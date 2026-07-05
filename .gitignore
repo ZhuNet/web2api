@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+.browser_data/
+web-llm-provider/.browser_data/
+web-llm-provider/__pycache__/
