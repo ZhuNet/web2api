@@ -69,25 +69,34 @@ class PageManager:
             }
         """)
 
+        stop_sel = self._browser.selectors.stop_button
         stop_btn = None
         try:
             stop_btn = await page.wait_for_selector(
-                "button:has-text('Stop'), [class*='stop'], [class*='generating']",
+                stop_sel,
                 timeout=3000,
             )
         except Exception:
             pass
 
         if stop_btn is not None:
-            try:
-                await stop_btn.wait_for_element_state("hidden", timeout=timeout_ms)
-            except Exception:
-                pass
+            elapsed = 0.0
+            interval = 0.5
+            deadline = self._request_timeout
+            while elapsed < deadline:
+                await asyncio.sleep(interval)
+                elapsed += interval
+                still = await page.evaluate(f"""
+                    () => !!document.querySelector({stop_sel!r})
+                """)
+                if not still:
+                    logger.info("Generating indicator gone, response complete")
+                    break
         else:
             logger.info("No stop button found, polling for new content stability")
             last_len = 0
-            for _ in range(30):
-                await asyncio.sleep(3)
+            for _ in range(120):
+                await asyncio.sleep(0.5)
                 cur_len = await page.evaluate(f"""
                     () => {{
                         const list = document.querySelector('.list_items');

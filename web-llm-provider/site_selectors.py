@@ -16,7 +16,7 @@ DOUBAO_SELECTORS = SiteSelectors(
     input_field="textarea.semi-input-textarea",
     send_button="button[type='submit']",
     response_area="[class*='container-'][class*='flex-1']",
-    stop_button="button:has-text('Stop')",
+    stop_button="svg.size-18 path[d^='M12 0.5C']",
     login_indicator="textarea",
 )
 
