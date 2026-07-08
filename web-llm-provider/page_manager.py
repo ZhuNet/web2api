@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import time
 
 import html2text
@@ -127,10 +128,10 @@ class PageManager:
         return response_text.strip()
 
     async def _extract_response_text(self, page) -> str:
-        html = await page.evaluate("""
+        data = await page.evaluate("""
             () => {
                 const list = document.querySelector('.list_items');
-                if (!list) return '';
+                if (!list) return { html: '', toolCalls: [] };
 
                 const rows = [...list.children].filter(r => (r.textContent || '').trim());
                 for (let i = rows.length - 1; i >= 0; i--) {
@@ -138,22 +139,43 @@ class PageManager:
                     if (containers.length > 0) {
                         const outer = containers[0].cloneNode(true);
                         const metas = outer.querySelectorAll('[class*="text-dbx-text-secondary"]');
-                        for (const el of metas) {
-                            el.remove();
-                        }
+                        for (const el of metas) el.remove();
                         const folds = outer.querySelectorAll('details, [class*="fold"], [class*="collapse"], [class*="think"], [class*="reason"]');
-                        for (const el of folds) {
-                            el.remove();
+                        for (const el of folds) el.remove();
+
+                        const toolCalls = [];
+                        const seen = new Set();
+                        const toolEls = outer.querySelectorAll('code[class*="preai-tool"]');
+                        for (const el of toolEls) {
+                            const raw = el.textContent.trim();
+                            if (!raw || seen.has(raw)) continue;
+                            seen.add(raw);
+                            toolCalls.push(raw);
+                            const pre = el.closest('pre');
+                            if (pre) {
+                                pre.remove();
+                            } else {
+                                el.remove();
+                            }
                         }
-                        return outer.innerHTML;
+
+                        return { html: outer.innerHTML, toolCalls };
                     }
                 }
-                return rows.length > 0 ? rows[rows.length - 1].textContent || '' : '';
+                return { html: rows.length > 0 ? rows[rows.length - 1].textContent || '' : '', toolCalls: [] };
             }
         """)
 
-        if not html:
+        if not data:
             return ''
+
+        tool_calls_raw = data.get('toolCalls', [])
+        html_content = data.get('html', '')
+
+        if not html_content:
+            return ''
+
+        logger.info(f'JS extracted {len(tool_calls_raw)} tool call(s)')
 
         converter = html2text.HTML2Text()
         converter.body_width = 0
@@ -162,6 +184,12 @@ class PageManager:
         converter.ignore_emphasis = False
         converter.protect_links = True
         converter.unicode_snob = True
-        markdown = converter.handle(html)
-        logger.info(f"Extracted markdown ({len(markdown)} chars): {markdown[:200]}")
+        markdown = converter.handle(html_content)
+
+        if tool_calls_raw:
+            markdown = re.sub(r'(?m)^\s*(?:```(?:language-)?preai-tool```\s*)?\s*preai-tool\s*$', '', markdown)
+            blocks = '\n\n'.join(f'```preai-tool\n{raw}\n```' for raw in tool_calls_raw)
+            markdown = markdown.rstrip() + '\n\n' + blocks
+
+        logger.info(f'Extracted markdown ({len(markdown)} chars, {len(tool_calls_raw)} tool blocks)')
         return markdown.strip()
